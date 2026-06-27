@@ -1,0 +1,75 @@
+name: Deploy Go Native Worker to Flex Consumption
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  AZURE_FUNCTIONAPP_NAME: ${{ vars.AZURE_FUNCTIONAPP_NAME }}
+  GO_VERSION: "1.24"
+  FUNCTIONS_WORKER_RUNTIME: "native"
+
+jobs:
+  build-and-package:
+    name: Build and Package Go App
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Source Code
+        uses: actions/checkout@v4
+
+      - name: Setup Go Runtime
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      - name: Setup Azure Functions Core Tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install azure-functions-core-tools-4
+
+      - name: Build artifact with func pack
+        run: |
+          # steam-deal-discord-bot.zip を生成する
+          func pack
+
+      - name: Upload Deployment Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: go-app-package
+          path: steam-deal-discord-bot.zip # ここを zip ファイル単体に変更
+          retention-days: 1
+
+  deploy-to-azure:
+    name: Deploy to Azure Flex Consumption
+    needs: build-and-package
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: go-app-package
+          path: . # カレントディレクトリにダウンロード
+
+      - name: Log in to Azure with OpenID Connect
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Deploy via Azure Functions Action
+        uses: Azure/functions-action@v1
+        with:
+          app-name: ${{ env.AZURE_FUNCTIONAPP_NAME }}
+          package: 'steam-deal-discord-bot.zip' # zipファイルを直接指定
+          respect-pom-xml: false # 必要に応じて
+        env:
+          # リモートビルド（Oryx）を無効化
+          ENABLE_ORYX_BUILD: 'false'
